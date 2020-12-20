@@ -1,0 +1,99 @@
+version: "3.4"
+
+services:
+  portus:
+    image: opensuse/portus:head
+    env_file: ./environment/portus.env
+    environment:
+      - PORTUS_DB_HOST=tasks.db
+      - PORTUS_DB_DATABASE=portus_production
+      - PORTUS_DB_POOL=5
+
+      - PORTUS_KEY_PATH=/run/secrets/portus-auth.key
+      
+      - PORTUS_CHECK_SSL_USAGE_ENABLED='false'
+      - RAILS_SERVE_STATIC_FILES='false'
+    secrets:
+      - portus-auth.key
+    volumes:
+      - portus-static-volume:/srv/Portus/public
+   
+
+  background:
+    image: opensuse/portus:head
+    env_file: ./environment/background.env
+    environment:
+      - CCONFIG_PREFIX=PORTUS
+
+      - PORTUS_DB_HOST=tasks.db
+      - PORTUS_DB_DATABASE=portus_production
+      - PORTUS_DB_POOL=5
+
+      - PORTUS_KEY_PATH=/run/secrets/portus-auth.key
+
+      - PORTUS_BACKGROUND=true
+    secrets:
+      - portus-auth.key
+
+  db:
+    image: mariadb:latest
+    env_file: ./environment/mariadb.env
+    environment:
+      - MYSQL_DATABASE=portus_production
+    volumes:
+      - type: volume
+        source: db-volume
+        target: /var/lib/mysql
+
+  registry:
+    image: registry:2
+    env_file: ./environment/registry.env
+    environment:
+      REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE: /run/secrets/portus-auth.cert
+      REGISTRY_NOTIFICATIONS_ENDPOINTS: >
+        - name: portus
+          url: http://tasks.portus:3000/v2/webhooks/events
+          timeout: 2000ms
+          threshold: 5
+          backoff: 1s
+    volumes:
+      - type: volume
+        source: registry-volume
+        target: /var/lib/registry
+    secrets:
+      - portus-auth.cert
+
+  nginx:
+    image: nginx:stable-alpine
+    volumes:
+      - portus-static-volume:/srv/Portus/public:ro
+    ports:
+      - target: 443
+        published: 443
+        mode: host
+    configs:
+      - source: nginx.conf
+        target: /etc/nginx/nginx.conf
+    secrets:
+      - portus.cert
+      - portus.key
+
+volumes:
+  portus-static-volume:
+  registry-volume:
+  db-volume:
+  
+secrets:
+  portus-auth.cert: 
+    file: secrets/keys/portus-auth.cert
+  portus-auth.key:
+    file: secrets/keys/portus-auth.key
+  portus.cert: 
+    file: secrets/keys/portus.cert
+  portus.key:
+    file: secrets/keys/portus.key
+
+
+configs:
+  nginx.conf:
+    file: nginx/nginx.conf
